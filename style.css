@@ -123,8 +123,72 @@ button:focus-visible {
   bottom: 20px;
   z-index: 5;
 }
-.corner.left { left: 22px; }
-.corner.right { right: 22px; }
+.corner.left   { left: 22px; }
+.corner.center { left: 50%; transform: translateX(-50%); }
+.corner.right  { right: 22px; }
+
+/* Reset button gets a muted gold color so it reads as "control"
+   rather than "action", distinct from the alchemy-red buttons. */
+#resetBtn {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+#resetBtn:hover { background: #f5edda; }
+
+/* ===================================================================
+   POLLUTANT BUBBLE — the obstacle
+   A dark oily circle that drifts around and pulses to demand attention.
+   =================================================================== */
+.pollutant {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  pointer-events: all;
+  z-index: 4;
+  background: radial-gradient(circle at 35% 35%, #7a3a1a, #3a1a08);
+  border: 2px solid #c06020;
+  box-shadow: 0 0 10px rgba(180, 80, 10, 0.7), inset 0 0 8px rgba(0,0,0,0.5);
+  animation: pollutant-pulse 1.2s ease-in-out infinite;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.pollutant:hover {
+  transform: translate(-50%, -50%) scale(1.15);
+  box-shadow: 0 0 18px rgba(220, 100, 10, 0.9);
+}
+.pollutant.popped {
+  transform: translate(-50%, -50%) scale(2.2);
+  opacity: 0;
+}
+@keyframes pollutant-pulse {
+  0%, 100% { box-shadow: 0 0 8px  rgba(180, 80, 10, 0.6), inset 0 0 8px rgba(0,0,0,0.5); }
+  50%       { box-shadow: 0 0 18px rgba(220,120, 20, 0.9), inset 0 0 8px rgba(0,0,0,0.5); }
+}
+
+/* Penalty number that floats up in red */
+.penalty-pop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  color: #e03030;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  pointer-events: none;
+  z-index: 7;
+  animation: float-up 0.8s ease-out forwards;
+}
+
+/* ===================================================================
+   CONFETTI CANVAS
+   =================================================================== */
+#confettiCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
 
 /* ===================================================================
    START SCREEN
@@ -433,6 +497,23 @@ button:focus-visible {
   white-space: nowrap;
   z-index: 5;
   pointer-events: none;
+}
+
+/* Controls reminder, just above the task hint. */
+.controls-hint {
+  position: absolute;
+  bottom: 112px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(9px, 1.3vw, 12px);
+  letter-spacing: 0.04em;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  white-space: nowrap;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0.9;
 }
 
 /* The two-hand tool toggle. Sits above the corner buttons so
