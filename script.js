@@ -1,449 +1,594 @@
-/* =================================================================
-   WATER ALCHEMIST  -  game logic
-   var only, named functions, no arrow functions, + for strings
-   ================================================================= */
+/* ===================================================================
+   DESIGN TOKENS
+   One place to change the look. Murky water transmuting to luminous
+   aqua is the signature of the whole game, so those two colors matter
+   most.
+   =================================================================== */
+:root {
+  --ink: #241f17;            /* dark brown-black text */
+  --parchment: #ece2c8;      /* aged paper for HUD panels */
+  --parchment-edge: #d8c9a3; /* parchment inner shadow */
+  --gold: #b48a3c;           /* alchemical gold for borders + diamonds */
+  --gold-bright: #d8b15e;
+  --alchemy-red: #9c3a2e;    /* the red ink from your sketch labels */
 
-/* ---- Tunable settings ---- */
-var TOTAL_TIME       = 90;
-var DEBRIS_COUNT     = 6;
-var PURIFY_PER_CLICK = 10;   /* 10 clicks to fully purify */
-var POINTS_PER_PURIFY = 5;
-var POINTS_PER_DEBRIS = 50;
+  --village: #7fa86b;        /* the green village ground */
+  --village-deep: #5f8a52;
 
-/* ---- Game state ---- */
-var currentTool    = "purify";
-var purity         = 0;
-var score          = 0;
-var debrisRemaining = 0;   /* starts at 0; only set inside spawnDebris */
-var debrisSpawned   = false; /* TRUE once spawnDebris has run for this round */
-var timeLeft       = TOTAL_TIME;
-var timerId        = null;
-var gameActive     = false;
+  --water-dirty: #524a39;    /* murky wellspring */
+  --water-dirty-2: #6b6149;
+  --water-clean: #4fb3cd;    /* luminous purified aqua */
+  --water-clean-2: #a7e4f1;
 
-/* Character movement state */
-var charX = 72;   /* % from left inside pond */
-var charY = 72;   /* % from top  inside pond */
-var charTargetX = 72;
-var charTargetY = 72;
-var charMoveId  = null;   /* requestAnimationFrame handle */
-
-/* ---- DOM references ---- */
-var startScreen  = document.getElementById("startScreen");
-var gameScreen   = document.getElementById("gameScreen");
-var resultScreen = document.getElementById("resultScreen");
-
-var pond        = document.getElementById("pond");
-var pondClean   = document.getElementById("pondClean");
-var pointerGlow = document.getElementById("pointerGlow");
-var character   = document.getElementById("character");
-
-var scoreValue = document.getElementById("scoreValue");
-var timeValue  = document.getElementById("timeValue");
-var purityFill = document.getElementById("purityFill");
-var taskHint   = document.getElementById("taskHint");
-
-var purifyTool  = document.getElementById("purifyTool");
-var collectTool = document.getElementById("collectTool");
-
-var resultTitle = document.getElementById("resultTitle");
-var resultText  = document.getElementById("resultText");
-var toast       = document.getElementById("toast");
-
-/* =================================================================
-   SCREEN SWITCHING
-   ================================================================= */
-function showScreen(name) {
-  startScreen.classList.add("hidden");
-  gameScreen.classList.add("hidden");
-  resultScreen.classList.add("hidden");
-  if (name === "start")  { startScreen.classList.remove("hidden"); }
-  if (name === "game")   { gameScreen.classList.remove("hidden"); }
-  if (name === "result") { resultScreen.classList.remove("hidden"); }
+  --panel-shadow: rgba(40, 30, 12, 0.35);
 }
 
-/* =================================================================
-   START / RESET
-   ================================================================= */
-function startGame() {
-  purity          = 0;
-  score           = 0;
-  timeLeft        = TOTAL_TIME;
-  debrisRemaining = 0;
-  debrisSpawned   = false;
+/* ===================================================================
+   PAGE BASE
+   =================================================================== */
+* { box-sizing: border-box; }
 
-  /* Reset character to lower-right starting position */
-  charX = 72;
-  charY = 72;
-  charTargetX = 72;
-  charTargetY = 72;
-  placeCharacter();
-
-  setTool("purify");
-  clearDebris();
-  spawnDebris(DEBRIS_COUNT);   /* sets debrisRemaining = DEBRIS_COUNT */
-
-  updateScore();
-  updateWater();
-  updateTimeDisplay();
-  updateTaskHint();
-
-  showScreen("game");
-  gameActive = true;
-  startTimer();
-  startCharacterLoop();
+html, body {
+  margin: 0;
+  height: 100%;
 }
 
-/* =================================================================
-   TIMER
-   ================================================================= */
-function startTimer() {
-  clearTimer();
-  timerId = setInterval(tick, 1000);
+body {
+  font-family: "EB Garamond", Georgia, serif;
+  color: var(--ink);
+  background: #1a1712;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
 }
 
-function clearTimer() {
-  if (timerId !== null) {
-    clearInterval(timerId);
-    timerId = null;
+/* The whole game lives in one framed stage so it sits centered on any
+   screen, like the rounded rectangle in your wireframes. */
+#stage {
+  position: relative;
+  width: 100%;
+  max-width: 980px;
+  aspect-ratio: 4 / 3;
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  border: 3px solid #141009;
+}
+
+/* A "screen" is one full view (start, game, or result). We show one at
+   a time by toggling the .hidden class from JavaScript. */
+.screen {
+  position: absolute;
+  inset: 0;
+  padding: 22px;
+}
+
+.hidden { display: none; }
+
+/* ===================================================================
+   SHARED PIECES: parchment panels, buttons, the gold diamond accent
+   =================================================================== */
+.panel {
+  background: var(--parchment);
+  border: 2px solid var(--gold);
+  border-radius: 12px;
+  box-shadow: 0 4px 0 var(--parchment-edge), 0 8px 18px var(--panel-shadow);
+  color: var(--ink);
+}
+
+.diamond {
+  width: 16px;
+  height: 16px;
+  background: var(--gold);
+  transform: rotate(45deg);
+  border: 2px solid var(--gold-bright);
+  flex: 0 0 auto;
+}
+
+button {
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--alchemy-red);
+  background: var(--parchment);
+  border: 2px solid var(--alchemy-red);
+  border-radius: 10px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  box-shadow: 0 3px 0 var(--parchment-edge);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--parchment-edge);
+}
+
+button:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--parchment-edge);
+}
+
+/* Always-visible keyboard focus, so the game is usable without a mouse. */
+button:focus-visible {
+  outline: 3px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+/* Buttons that sit in the bottom corners (Help/Login, Options/Next Level). */
+.corner {
+  position: absolute;
+  bottom: 20px;
+  z-index: 5;
+}
+.corner.left   { left: 22px; }
+.corner.center { left: 50%; transform: translateX(-50%); }
+.corner.right  { right: 22px; }
+
+/* Reset button gets a muted gold color so it reads as "control"
+   rather than "action", distinct from the alchemy-red buttons. */
+#resetBtn {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+#resetBtn:hover { background: #f5edda; }
+
+/* ===================================================================
+   POLLUTANT BUBBLE — the obstacle
+   A dark oily circle that drifts around and pulses to demand attention.
+   =================================================================== */
+.pollutant {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  pointer-events: all;
+  z-index: 4;
+  background: radial-gradient(circle at 35% 35%, #7a3a1a, #3a1a08);
+  border: 2px solid #c06020;
+  box-shadow: 0 0 10px rgba(180, 80, 10, 0.7), inset 0 0 8px rgba(0,0,0,0.5);
+  animation: pollutant-pulse 1.2s ease-in-out infinite;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.pollutant:hover {
+  transform: translate(-50%, -50%) scale(1.15);
+  box-shadow: 0 0 18px rgba(220, 100, 10, 0.9);
+}
+.pollutant.popped {
+  transform: translate(-50%, -50%) scale(2.2);
+  opacity: 0;
+}
+@keyframes pollutant-pulse {
+  0%, 100% { box-shadow: 0 0 8px  rgba(180, 80, 10, 0.6), inset 0 0 8px rgba(0,0,0,0.5); }
+  50%       { box-shadow: 0 0 18px rgba(220,120, 20, 0.9), inset 0 0 8px rgba(0,0,0,0.5); }
+}
+
+/* Penalty number that floats up in red */
+.penalty-pop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  color: #e03030;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  pointer-events: none;
+  z-index: 7;
+  animation: float-up 0.8s ease-out forwards;
+}
+
+/* ===================================================================
+   CONFETTI CANVAS
+   =================================================================== */
+#confettiCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ===================================================================
+   START SCREEN
+   =================================================================== */
+#startScreen {
+  background:
+    radial-gradient(120% 120% at 50% 0%, #bcd6e8 0%, #8fb6d6 55%, #6f9ec4 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 12px 30px;
+  margin-top: 6px;
+}
+
+.title-bar h1 {
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(22px, 4.4vw, 40px);
+  margin: 0;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+/* The wellspring preview: a calm circle that hints at the water you will
+   soon be purifying. A slow shimmer gives it a touch of life. */
+.wellspring-preview {
+  width: clamp(150px, 30vw, 230px);
+  height: clamp(150px, 30vw, 230px);
+  border-radius: 50%;
+  margin: 18px 0;
+  border: 4px solid var(--gold);
+  background:
+    radial-gradient(60% 60% at 40% 35%, var(--water-clean-2) 0%, var(--water-clean) 45%, #2d7e96 100%);
+  box-shadow: 0 0 0 6px rgba(255,255,255,0.25), inset 0 0 40px rgba(255,255,255,0.3);
+  animation: shimmer 5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { box-shadow: 0 0 0 6px rgba(255,255,255,0.20), inset 0 0 40px rgba(255,255,255,0.30); }
+  50%      { box-shadow: 0 0 0 10px rgba(255,255,255,0.35), inset 0 0 60px rgba(255,255,255,0.45); }
+}
+
+.intro {
+  font-style: italic;
+  font-size: clamp(15px, 2.4vw, 20px);
+  text-align: center;
+  max-width: 80%;
+  padding: 10px 24px;
+  margin: 4px 0 16px;
+}
+
+#startBtn {
+  font-size: 20px;
+  padding: 14px 44px;
+}
+
+/* The Settings control floats top-right like the arrow-and-diamond in
+   your start-screen sketch. */
+.settings-wrap {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.settings-wrap .diamond { width: 22px; height: 22px; }
+
+/* ===================================================================
+   GAME SCREEN
+   =================================================================== */
+#gameScreen {
+  background:
+    radial-gradient(130% 120% at 50% 0%, var(--village) 0%, var(--village-deep) 100%);
+}
+
+.level-title {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 8px 22px;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(15px, 2.6vw, 22px);
+  white-space: nowrap;
+  z-index: 4;
+}
+
+/* Score (top-left) and Time (top-right) HUD panels. */
+.hud {
+  position: absolute;
+  top: 16px;
+  width: clamp(96px, 16vw, 130px);
+  padding: 8px 10px;
+  text-align: center;
+  z-index: 4;
+}
+.hud.left { left: 18px; }
+.hud.right { right: 18px; }
+
+.hud .label {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 13px;
+  color: var(--alchemy-red);
+  letter-spacing: 0.08em;
+}
+.hud .value {
+  font-size: clamp(20px, 3.6vw, 30px);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+/* A slim purity meter under the title. The player needs to see how close
+   the spring is to clean. */
+.purity-wrap {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(180px, 34vw, 280px);
+  z-index: 4;
+  text-align: center;
+}
+.purity-label {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--parchment);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  margin-bottom: 3px;
+}
+.purity-track {
+  height: 12px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.30);
+  border: 2px solid var(--gold);
+  overflow: hidden;
+}
+.purity-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #2d7e96, var(--water-clean), var(--water-clean-2));
+  transition: width 0.25s ease;
+}
+
+/* THE WELLSPRING. A square element rounded into a circle, with overflow
+   hidden so debris and water effects stay clipped inside the rim. */
+.pond {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(72vmin, 560px);
+  height: min(72vmin, 560px);
+  border-radius: 50%;
+  overflow: hidden;
+  border: 5px solid #2a2114;
+  background:
+    radial-gradient(60% 60% at 42% 38%, var(--water-dirty-2) 0%, var(--water-dirty) 60%, #3a3326 100%);
+  box-shadow: inset 0 0 50px rgba(0,0,0,0.55), 0 12px 30px rgba(0,0,0,0.45);
+  cursor: crosshair;
+}
+
+/* The clean-water layer sits on top of the dirty pond. Its opacity is
+   driven straight from the purity value, so 0 purity = invisible (all
+   murk showing) and 100 purity = fully clear. This is the whole
+   transmutation effect. */
+.pond-clean {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 60% at 40% 35%, var(--water-clean-2) 0%, var(--water-clean) 50%, #2d7e96 100%);
+  transition: opacity 0.4s ease;
+}
+
+/* A faint alchemical ring etched on the water surface. */
+.sigil-ring {
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  border: 1px dashed rgba(255,255,255,0.18);
+  pointer-events: none;
+}
+
+/* DEBRIS. Each piece is an absolutely positioned element placed by
+   JavaScript. Shape and color come from extra classes. */
+.debris {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  z-index: 2;
+}
+.debris:hover { transform: translate(-50%, -50%) scale(1.12); }
+
+/* When collected we add this class to fade + shrink the piece out. */
+.debris.collected {
+  transform: translate(-50%, -50%) scale(0.2);
+  opacity: 0;
+}
+
+.debris.square    { width: 26px; height: 26px; border-radius: 4px; background: #c9b24f; }
+.debris.rect      { width: 40px; height: 22px; border-radius: 5px; background: #cf8a5c; }
+.debris.circle    { width: 30px; height: 30px; border-radius: 50%; background: #c7c34f; }
+.debris.oval      { width: 22px; height: 34px; border-radius: 50%; background: #6fae7a; }
+.debris.diamondbit{ width: 26px; height: 26px; background: #cf86a8; transform: translate(-50%, -50%) rotate(45deg); }
+.debris.diamondbit:hover     { transform: translate(-50%, -50%) rotate(45deg) scale(1.12); }
+.debris.diamondbit.collected { transform: translate(-50%, -50%) rotate(45deg) scale(0.2); opacity: 0; }
+
+/* THE CHARACTER — positioned by JS via left/top percentages.
+   pointer-events none keeps it from blocking pond/debris clicks. */
+.character {
+  position: absolute;
+  left: 72%;
+  top: 72%;
+  transform: translate(-50%, -50%);
+  width: clamp(48px, 9vw, 72px);
+  z-index: 3;
+  pointer-events: none;
+  text-align: center;
+}
+.character svg { width: 100%; height: auto; display: block; }
+.character .name {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 9px;
+  color: var(--parchment);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  margin-top: 2px;
+  letter-spacing: 0.06em;
+}
+
+/* The glowing "hand" that follows the cursor over the water. Its color
+   tells you which tool is active. */
+.pointer-glow {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease;
+  z-index: 6;
+  mix-blend-mode: screen;
+}
+.pointer-glow.purify  { background: radial-gradient(circle, rgba(120,225,245,0.9), rgba(120,225,245,0) 70%); }
+.pointer-glow.collect { background: radial-gradient(circle, rgba(245,205,120,0.9), rgba(245,205,120,0) 70%); }
+
+/* A short-lived ripple spawned where you purify. */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(180, 235, 250, 0.85);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+  animation: ripple-out 0.6s ease-out forwards;
+}
+@keyframes ripple-out {
+  from { width: 6px; height: 6px; opacity: 0.9; }
+  to   { width: 90px; height: 90px; opacity: 0; }
+}
+
+/* A little "+points" number that floats up from a collected piece. */
+.score-pop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  pointer-events: none;
+  z-index: 7;
+  animation: float-up 0.7s ease-out forwards;
+}
+@keyframes float-up {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: translate(-50%, -160%); }
+}
+
+/* Task hint: lives just above the toolbar, tells the player
+   what they still need to finish. */
+.task-hint {
+  position: absolute;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(11px, 1.6vw, 14px);
+  letter-spacing: 0.06em;
+  color: var(--parchment);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  white-space: nowrap;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Controls reminder, just above the task hint. */
+.controls-hint {
+  position: absolute;
+  bottom: 112px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(9px, 1.3vw, 12px);
+  letter-spacing: 0.04em;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  white-space: nowrap;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+/* The two-hand tool toggle. Sits above the corner buttons so
+   nothing overlaps. "Only one action at a time" = one active
+   tool state at a time. */
+.toolbar {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 5;
+}
+.tool-btn { font-size: 13px; padding: 8px 14px; }
+.tool-btn.active {
+  background: var(--alchemy-red);
+  color: var(--parchment);
+  box-shadow: 0 3px 0 #6e2419, inset 0 0 0 2px var(--gold-bright);
+}
+
+/* ===================================================================
+   RESULT OVERLAY
+   =================================================================== */
+#resultScreen {
+  background: rgba(15, 12, 8, 0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 20;
+}
+.result-card {
+  padding: 30px 40px;
+  max-width: 80%;
+}
+.result-card h2 {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(22px, 4vw, 34px);
+  margin: 0 0 10px;
+  color: var(--ink);
+}
+.result-card p {
+  font-size: 18px;
+  font-style: italic;
+  margin: 0 0 18px;
+}
+
+/* ===================================================================
+   TOAST: a brief message for buttons not yet built.
+   =================================================================== */
+#toast {
+  position: absolute;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  padding: 10px 18px;
+  max-width: 80%;
+  text-align: center;
+  font-style: italic;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 30;
+}
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Respect players who ask their system for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
   }
 }
-
-function tick() {
-  timeLeft = timeLeft - 1;
-  updateTimeDisplay();
-  if (timeLeft <= 0) { endGame(false); }
-}
-
-function formatTime(totalSeconds) {
-  var minutes     = Math.floor(totalSeconds / 60);
-  var seconds     = totalSeconds % 60;
-  var secondsText = "" + seconds;
-  if (seconds < 10) { secondsText = "0" + seconds; }
-  return minutes + ":" + secondsText;
-}
-
-function updateTimeDisplay() {
-  timeValue.textContent = formatTime(timeLeft);
-}
-
-/* =================================================================
-   DEBRIS
-   ================================================================= */
-var debrisShapes = ["square", "rect", "circle", "oval", "diamondbit"];
-
-function clearDebris() {
-  var existing = pond.querySelectorAll(".debris");
-  var i;
-  for (i = 0; i < existing.length; i++) { existing[i].remove(); }
-  debrisRemaining = 0;
-  debrisSpawned   = false;
-}
-
-function spawnDebris(count) {
-  var i;
-  for (i = 0; i < count; i++) {
-    var spot  = randomPointInCircle();
-    var piece = document.createElement("div");
-    var shape = debrisShapes[Math.floor(Math.random() * debrisShapes.length)];
-    piece.className  = "debris " + shape;
-    piece.style.left = spot.x + "%";
-    piece.style.top  = spot.y + "%";
-    piece.addEventListener("click", onDebrisClick);
-    pond.appendChild(piece);
-  }
-  debrisRemaining = count;
-  debrisSpawned   = true;   /* now the win check is allowed */
-}
-
-/* Rejection sampling — land inside the circle, away from the character */
-function randomPointInCircle() {
-  var centerX = 50;
-  var centerY = 50;
-  var radius  = 36;
-  var x = 0;
-  var y = 0;
-  var tries = 0;
-  while (tries < 200) {
-    x = Math.random() * 100;
-    y = Math.random() * 100;
-    var dx = x - centerX;
-    var dy = y - centerY;
-    var distance = Math.sqrt(dx * dx + dy * dy);
-    var nearCharacter = (x > 58 && y > 58);
-    if (distance <= radius && nearCharacter === false) {
-      return { x: x, y: y };
-    }
-    tries = tries + 1;
-  }
-  return { x: 30, y: 30 };
-}
-
-function onDebrisClick(event) {
-  if (gameActive === false) { return; }
-  if (currentTool === "collect") {
-    collectDebris(event.currentTarget, event);
-  } else {
-    purifyAt(event.clientX, event.clientY);
-  }
-}
-
-function collectDebris(piece, event) {
-  if (piece.classList.contains("collected")) { return; }
-  piece.classList.add("collected");
-  piece.removeEventListener("click", onDebrisClick);
-  debrisRemaining = debrisRemaining - 1;
-  score = score + POINTS_PER_DEBRIS;
-  updateScore();
-  updateTaskHint();
-  showScorePop(event.clientX, event.clientY, "+" + POINTS_PER_DEBRIS);
-  setTimeout(function () { piece.remove(); }, 220);
-
-  /* Walk the character toward the collected piece */
-  var pondBounds = pond.getBoundingClientRect();
-  charTargetX = ((event.clientX - pondBounds.left) / pondBounds.width)  * 100;
-  charTargetY = ((event.clientY - pondBounds.top)  / pondBounds.height) * 100;
-
-  checkWin();
-}
-
-/* =================================================================
-   PURIFYING
-   ================================================================= */
-function onPondClick(event) {
-  if (gameActive === false) { return; }
-  /* Only react to clicks on the bare water layers, not debris */
-  if (event.target !== pond &&
-      event.target !== pondClean &&
-      event.target !== document.querySelector(".sigil-ring")) { return; }
-  if (currentTool === "purify") {
-    purifyAt(event.clientX, event.clientY);
-  }
-}
-
-function purifyAt(clientX, clientY) {
-  if (purity >= 100) { return; }
-  purity = purity + PURIFY_PER_CLICK;
-  if (purity > 100) { purity = 100; }
-  score = score + POINTS_PER_PURIFY;
-  updateScore();
-  updateWater();
-  updateTaskHint();
-  spawnRipple(clientX, clientY);
-
-  /* Walk the character toward where the player purified */
-  var pondBounds = pond.getBoundingClientRect();
-  charTargetX = ((clientX - pondBounds.left) / pondBounds.width)  * 100;
-  charTargetY = ((clientY - pondBounds.top)  / pondBounds.height) * 100;
-
-  checkWin();
-}
-
-function updateWater() {
-  pondClean.style.opacity = purity / 100;
-  purityFill.style.width  = purity + "%";
-}
-
-/* =================================================================
-   TASK HINT
-   ================================================================= */
-function updateTaskHint() {
-  var waterDone  = (purity >= 100);
-  var debrisDone = (debrisRemaining <= 0 && debrisSpawned === true);
-
-  if (waterDone === false && debrisDone === false) {
-    taskHint.textContent = "Purify the water and collect the debris";
-  } else if (waterDone === false) {
-    taskHint.textContent = "Now purify the water!";
-  } else if (debrisDone === false) {
-    taskHint.textContent = "Now collect the remaining debris!";
-  } else {
-    taskHint.textContent = "Complete!";
-  }
-}
-
-/* =================================================================
-   WIN / LOSE
-   The debrisSpawned guard stops the win from firing at startup
-   when debrisRemaining is still 0 from initialization.
-   ================================================================= */
-function checkWin() {
-  if (debrisSpawned === false) { return; }   /* not ready yet */
-  if (purity >= 100 && debrisRemaining <= 0) {
-    endGame(true);
-  }
-}
-
-function endGame(won) {
-  gameActive = false;
-  clearTimer();
-  stopCharacterLoop();
-  if (won) {
-    resultTitle.textContent = "The wellspring runs clear";
-    resultText.textContent  = "The village drinks freely tonight. Final score: " + score + ".";
-  } else {
-    resultTitle.textContent = "The waters clouded over";
-    resultText.textContent  = "Time ran dry before the spring did. Score: " + score + ".";
-  }
-  showScreen("result");
-}
-
-/* =================================================================
-   SCORE + TOOL DISPLAY
-   ================================================================= */
-function updateScore() {
-  scoreValue.textContent = "" + score;
-}
-
-function setTool(tool) {
-  currentTool = tool;
-  if (tool === "purify") {
-    purifyTool.classList.add("active");
-    collectTool.classList.remove("active");
-    pointerGlow.className = "pointer-glow purify";
-  } else {
-    collectTool.classList.add("active");
-    purifyTool.classList.remove("active");
-    pointerGlow.className = "pointer-glow collect";
-  }
-}
-
-/* =================================================================
-   CHARACTER MOVEMENT
-   The character slides toward charTargetX/Y each frame.
-   It stays clamped inside the pond circle so it never escapes.
-   ================================================================= */
-function placeCharacter() {
-  character.style.left = charX + "%";
-  character.style.top  = charY + "%";
-}
-
-function startCharacterLoop() {
-  stopCharacterLoop();
-  charMoveId = requestAnimationFrame(characterStep);
-}
-
-function stopCharacterLoop() {
-  if (charMoveId !== null) {
-    cancelAnimationFrame(charMoveId);
-    charMoveId = null;
-  }
-}
-
-function characterStep() {
-  var speed = 0.04;   /* fraction of remaining distance to close each frame */
-
-  var dx = charTargetX - charX;
-  var dy = charTargetY - charY;
-
-  /* Only move if there is meaningful distance left */
-  if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-    charX = charX + dx * speed;
-    charY = charY + dy * speed;
-
-    /* Clamp inside pond circle (center 50,50 radius ~38) */
-    var cdx = charX - 50;
-    var cdy = charY - 50;
-    var dist = Math.sqrt(cdx * cdx + cdy * cdy);
-    if (dist > 38) {
-      charX = 50 + (cdx / dist) * 38;
-      charY = 50 + (cdy / dist) * 38;
-    }
-
-    placeCharacter();
-  }
-
-  if (gameActive) {
-    charMoveId = requestAnimationFrame(characterStep);
-  }
-}
-
-/* =================================================================
-   VISUAL EFFECTS
-   ================================================================= */
-function clientToPercent(clientX, clientY) {
-  var bounds = pond.getBoundingClientRect();
-  var px = ((clientX - bounds.left) / bounds.width)  * 100;
-  var py = ((clientY - bounds.top)  / bounds.height) * 100;
-  return { x: px, y: py };
-}
-
-function spawnRipple(clientX, clientY) {
-  var spot = clientToPercent(clientX, clientY);
-  var ring = document.createElement("div");
-  ring.className  = "ripple";
-  ring.style.left = spot.x + "%";
-  ring.style.top  = spot.y + "%";
-  pond.appendChild(ring);
-  setTimeout(function () { ring.remove(); }, 600);
-}
-
-function showScorePop(clientX, clientY, text) {
-  var spot = clientToPercent(clientX, clientY);
-  var pop  = document.createElement("div");
-  pop.className   = "score-pop";
-  pop.textContent = text;
-  pop.style.left  = spot.x + "%";
-  pop.style.top   = spot.y + "%";
-  pond.appendChild(pop);
-  setTimeout(function () { pop.remove(); }, 700);
-}
-
-function onPondMove(event) {
-  var spot = clientToPercent(event.clientX, event.clientY);
-  pointerGlow.style.left    = spot.x + "%";
-  pointerGlow.style.top     = spot.y + "%";
-  pointerGlow.style.opacity = 1;
-}
-
-function onPondLeave() {
-  pointerGlow.style.opacity = 0;
-}
-
-/* =================================================================
-   TOAST
-   ================================================================= */
-var toastTimer = null;
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add("show");
-  if (toastTimer !== null) { clearTimeout(toastTimer); }
-  toastTimer = setTimeout(function () {
-    toast.classList.remove("show");
-  }, 2600);
-}
-
-/* =================================================================
-   EVENT WIRING
-   ================================================================= */
-document.getElementById("startBtn").addEventListener("click", startGame);
-document.getElementById("playAgainBtn").addEventListener("click", startGame);
-
-purifyTool.addEventListener("click",  function () { setTool("purify"); });
-collectTool.addEventListener("click", function () { setTool("collect"); });
-
-pond.addEventListener("click",      onPondClick);
-pond.addEventListener("mousemove",  onPondMove);
-pond.addEventListener("mouseleave", onPondLeave);
-
-document.addEventListener("keydown", function (event) {
-  if (event.key === "1") { setTool("purify"); }
-  if (event.key === "2") { setTool("collect"); }
-});
-
-document.getElementById("helpBtn").addEventListener("click", function () {
-  showToast("Purifying Hand: click the water to clean it. Gathering Hand: click debris to collect it. Finish both before time runs out!");
-});
-document.getElementById("loginBtn").addEventListener("click", function () {
-  showToast("Accounts arrive in a later build. For now, just press Start.");
-});
-document.getElementById("settingsBtn").addEventListener("click", function () {
-  showToast("Settings are still on the workbench.");
-});
-document.getElementById("optionsBtn").addEventListener("click", function () {
-  showToast("Options are still on the workbench.");
-});
-document.getElementById("nextLevelBtn").addEventListener("click", function () {
-  showToast("Only the Village spring exists so far. Clear this one first.");
-});
-
-showScreen("start");
