@@ -65,7 +65,7 @@ body {
   padding: 22px;
 }
 
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* ===================================================================
    SHARED PIECES: parchment panels, buttons, the gold diamond accent
@@ -546,6 +546,9 @@ button:focus-visible {
   justify-content: center;
   text-align: center;
   z-index: 20;
+}
+#resultScreen.hidden {
+  display: none !important;
 }
 .result-card {
   padding: 30px 40px;
