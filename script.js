@@ -1,31 +1,57 @@
 /* =================================================================
    WATER ALCHEMIST  -  game logic
    var only, named functions, no arrow functions, + for strings
+
+   CONTROLS
+     Arrow keys or WASD ... move the alchemist
+     Z .................... Purifying Hand  (cleans the water)
+     X .................... Gathering Hand  (collects debris / pops pollutants)
+     R .................... reset the round
+   Both abilities act on whatever is right where the alchemist stands.
+   Mouse still works too: click water to purify, click debris to collect.
    ================================================================= */
 
 /* ---- Tunable settings ---- */
-var TOTAL_TIME       = 90;
-var DEBRIS_COUNT     = 6;
-var PURIFY_PER_CLICK = 10;   /* 10 clicks to fully purify */
-var POINTS_PER_PURIFY = 5;
-var POINTS_PER_DEBRIS = 50;
+var TOTAL_TIME         = 90;
+var DEBRIS_COUNT       = 6;
+var PURIFY_PER_TICK    = 7;     /* purity added each purify tick */
+var POINTS_PER_PURIFY  = 2;
+var POINTS_PER_DEBRIS  = 50;
+
+var MOVE_SPEED         = 1.0;   /* percent of pond moved per frame */
+var PURIFY_COOLDOWN    = 130;   /* ms between purify ticks while holding Z */
+var COLLECT_COOLDOWN   = 220;   /* ms between gather actions while holding X */
+var COLLECT_RADIUS     = 14;    /* how close (in %) the alchemist must be */
+
+var POLLUTANT_INTERVAL = 6000;
+var POLLUTANT_PENALTY  = 30;
+var POLLUTANT_LIFETIME = 4000;
+var POLLUTANT_SIZE     = 28;
 
 /* ---- Game state ---- */
-var currentTool    = "purify";
-var purity         = 0;
-var score          = 0;
-var debrisRemaining = 0;   /* starts at 0; only set inside spawnDebris */
-var debrisSpawned   = false; /* TRUE once spawnDebris has run for this round */
-var timeLeft       = TOTAL_TIME;
-var timerId        = null;
-var gameActive     = false;
+var purity          = 0;
+var score           = 0;
+var debrisRemaining = 0;
+var debrisSpawned   = false;
+var timeLeft        = TOTAL_TIME;
+var timerId         = null;
+var gameActive      = false;
 
-/* Character movement state */
-var charX = 72;   /* % from left inside pond */
-var charY = 72;   /* % from top  inside pond */
-var charTargetX = 72;
-var charTargetY = 72;
-var charMoveId  = null;   /* requestAnimationFrame handle */
+/* Pollutant state */
+var pollutantSpawnId = null;
+var activePollutants = [];
+
+/* Character + input state */
+var charX = 72;
+var charY = 72;
+var charMoveId = null;
+var keysDown = { up: false, down: false, left: false, right: false, z: false, x: false };
+var lastPurifyTime  = 0;
+var lastCollectTime = 0;
+
+/* Confetti state */
+var confettiPieces = [];
+var confettiAnimId = null;
 
 /* ---- DOM references ---- */
 var startScreen  = document.getElementById("startScreen");
@@ -45,9 +71,10 @@ var taskHint   = document.getElementById("taskHint");
 var purifyTool  = document.getElementById("purifyTool");
 var collectTool = document.getElementById("collectTool");
 
-var resultTitle = document.getElementById("resultTitle");
-var resultText  = document.getElementById("resultText");
-var toast       = document.getElementById("toast");
+var resultTitle    = document.getElementById("resultTitle");
+var resultText     = document.getElementById("resultText");
+var confettiCanvas = document.getElementById("confettiCanvas");
+var toast          = document.getElementById("toast");
 
 /* =================================================================
    SCREEN SWITCHING
@@ -71,16 +98,21 @@ function startGame() {
   debrisRemaining = 0;
   debrisSpawned   = false;
 
-  /* Reset character to lower-right starting position */
-  charX = 72;
-  charY = 72;
-  charTargetX = 72;
-  charTargetY = 72;
-  placeCharacter();
+  /* clear any held keys from a previous round */
+  keysDown.up = false; keysDown.down = false;
+  keysDown.left = false; keysDown.right = false;
+  keysDown.z = false; keysDown.x = false;
+  purifyTool.classList.remove("active");
+  collectTool.classList.remove("active");
 
-  setTool("purify");
+  charX = 72; charY = 72;
+  placeCharacter();
+  pointerGlow.style.opacity = 0;
+
   clearDebris();
-  spawnDebris(DEBRIS_COUNT);   /* sets debrisRemaining = DEBRIS_COUNT */
+  clearAllPollutants();
+  stopConfetti();
+  spawnDebris(DEBRIS_COUNT);
 
   updateScore();
   updateWater();
@@ -91,6 +123,15 @@ function startGame() {
   gameActive = true;
   startTimer();
   startCharacterLoop();
+  startPollutantSpawner();
+}
+
+function resetGame() {
+  gameActive = false;
+  clearTimer();
+  stopCharacterLoop();
+  clearAllPollutants();
+  startGame();
 }
 
 /* =================================================================
@@ -102,10 +143,7 @@ function startTimer() {
 }
 
 function clearTimer() {
-  if (timerId !== null) {
-    clearInterval(timerId);
-    timerId = null;
-  }
+  if (timerId !== null) { clearInterval(timerId); timerId = null; }
 }
 
 function tick() {
@@ -152,42 +190,30 @@ function spawnDebris(count) {
     pond.appendChild(piece);
   }
   debrisRemaining = count;
-  debrisSpawned   = true;   /* now the win check is allowed */
+  debrisSpawned   = true;
 }
 
-/* Rejection sampling — land inside the circle, away from the character */
 function randomPointInCircle() {
-  var centerX = 50;
-  var centerY = 50;
-  var radius  = 36;
-  var x = 0;
-  var y = 0;
-  var tries = 0;
+  var cx = 50; var cy = 50; var radius = 36;
+  var x = 0; var y = 0; var tries = 0;
   while (tries < 200) {
     x = Math.random() * 100;
     y = Math.random() * 100;
-    var dx = x - centerX;
-    var dy = y - centerY;
-    var distance = Math.sqrt(dx * dx + dy * dy);
-    var nearCharacter = (x > 58 && y > 58);
-    if (distance <= radius && nearCharacter === false) {
-      return { x: x, y: y };
-    }
+    var dx = x - cx; var dy = y - cy;
+    if (Math.sqrt(dx*dx + dy*dy) <= radius) { return { x: x, y: y }; }
     tries = tries + 1;
   }
   return { x: 30, y: 30 };
 }
 
+/* Mouse click on a debris piece collects it directly. */
 function onDebrisClick(event) {
   if (gameActive === false) { return; }
-  if (currentTool === "collect") {
-    collectDebris(event.currentTarget, event);
-  } else {
-    purifyAt(event.clientX, event.clientY);
-  }
+  event.stopPropagation();
+  collectDebrisPiece(event.currentTarget);
 }
 
-function collectDebris(piece, event) {
+function collectDebrisPiece(piece) {
   if (piece.classList.contains("collected")) { return; }
   piece.classList.add("collected");
   piece.removeEventListener("click", onDebrisClick);
@@ -195,52 +221,165 @@ function collectDebris(piece, event) {
   score = score + POINTS_PER_DEBRIS;
   updateScore();
   updateTaskHint();
-  showScorePop(event.clientX, event.clientY, "+" + POINTS_PER_DEBRIS);
+
+  var xp = parseFloat(piece.style.left);
+  var yp = parseFloat(piece.style.top);
+  showScorePopPercent(xp, yp, "+" + POINTS_PER_DEBRIS, false);
+
   setTimeout(function () { piece.remove(); }, 220);
-
-  /* Walk the character toward the collected piece */
-  var pondBounds = pond.getBoundingClientRect();
-  charTargetX = ((event.clientX - pondBounds.left) / pondBounds.width)  * 100;
-  charTargetY = ((event.clientY - pondBounds.top)  / pondBounds.height) * 100;
-
   checkWin();
 }
 
 /* =================================================================
    PURIFYING
    ================================================================= */
+/* Mouse click on the bare water purifies at the click point. */
 function onPondClick(event) {
   if (gameActive === false) { return; }
-  /* Only react to clicks on the bare water layers, not debris */
   if (event.target !== pond &&
       event.target !== pondClean &&
       event.target !== document.querySelector(".sigil-ring")) { return; }
-  if (currentTool === "purify") {
-    purifyAt(event.clientX, event.clientY);
-  }
+  var spot = clientToPercent(event.clientX, event.clientY);
+  purifyAtPercent(spot.x, spot.y);
 }
 
-function purifyAt(clientX, clientY) {
+function purifyAtPercent(xp, yp) {
   if (purity >= 100) { return; }
-  purity = purity + PURIFY_PER_CLICK;
+  purity = purity + PURIFY_PER_TICK;
   if (purity > 100) { purity = 100; }
   score = score + POINTS_PER_PURIFY;
   updateScore();
   updateWater();
   updateTaskHint();
-  spawnRipple(clientX, clientY);
-
-  /* Walk the character toward where the player purified */
-  var pondBounds = pond.getBoundingClientRect();
-  charTargetX = ((clientX - pondBounds.left) / pondBounds.width)  * 100;
-  charTargetY = ((clientY - pondBounds.top)  / pondBounds.height) * 100;
-
+  spawnRipplePercent(xp, yp);
   checkWin();
 }
 
 function updateWater() {
   pondClean.style.opacity = purity / 100;
   purityFill.style.width  = purity + "%";
+}
+
+/* =================================================================
+   GATHERING (X)  —  acts on the nearest debris OR pollutant in reach
+   ================================================================= */
+function gatherNearCharacter() {
+  var best     = null;
+  var bestDist = COLLECT_RADIUS;
+  var bestType = null;
+  var i;
+
+  /* check debris */
+  var pieces = pond.querySelectorAll(".debris");
+  for (i = 0; i < pieces.length; i++) {
+    var p = pieces[i];
+    if (p.classList.contains("collected")) { continue; }
+    var dxp = parseFloat(p.style.left) - charX;
+    var dyp = parseFloat(p.style.top)  - charY;
+    var dp  = Math.sqrt(dxp*dxp + dyp*dyp);
+    if (dp <= bestDist) { best = p; bestDist = dp; bestType = "debris"; }
+  }
+
+  /* check pollutants */
+  for (i = 0; i < activePollutants.length; i++) {
+    var el  = activePollutants[i].el;
+    var dxq = parseFloat(el.style.left) - charX;
+    var dyq = parseFloat(el.style.top)  - charY;
+    var dq  = Math.sqrt(dxq*dxq + dyq*dyq);
+    if (dq <= bestDist) { best = el; bestDist = dq; bestType = "pollutant"; }
+  }
+
+  if (best !== null) {
+    if (bestType === "debris") {
+      collectDebrisPiece(best);
+    } else {
+      popPollutant(best);
+    }
+  }
+}
+
+/* =================================================================
+   POLLUTANT OBSTACLE  (LevelUp: Challenge)
+   ================================================================= */
+function startPollutantSpawner() {
+  stopPollutantSpawner();
+  pollutantSpawnId = setInterval(spawnPollutant, POLLUTANT_INTERVAL);
+}
+
+function stopPollutantSpawner() {
+  if (pollutantSpawnId !== null) { clearInterval(pollutantSpawnId); pollutantSpawnId = null; }
+}
+
+function spawnPollutant() {
+  if (gameActive === false) { return; }
+
+  var spot = randomPointInCircle();
+  var el   = document.createElement("div");
+  el.className  = "pollutant";
+  el.style.left = spot.x + "%";
+  el.style.top  = spot.y + "%";
+  el.style.width  = POLLUTANT_SIZE + "px";
+  el.style.height = POLLUTANT_SIZE + "px";
+
+  /* If ignored, it bursts: lose score and dirty the water. */
+  var expiryId = setTimeout(function () {
+    if (gameActive === false) { return; }
+    purity = purity - 8;
+    if (purity < 0) { purity = 0; }
+    updateWater();
+    updateTaskHint();
+    score = score - POLLUTANT_PENALTY;
+    if (score < 0) { score = 0; }
+    updateScore();
+    showScorePopPercent(parseFloat(el.style.left), parseFloat(el.style.top),
+                        "-" + POLLUTANT_PENALTY, true);
+    removePollutantEl(el);
+  }, POLLUTANT_LIFETIME);
+
+  /* Mouse click pops it early for a bonus. */
+  el.addEventListener("click", function (event) {
+    event.stopPropagation();
+    if (gameActive === false) { return; }
+    popPollutant(el);
+  });
+
+  pond.appendChild(el);
+  activePollutants.push({ el: el, expiryId: expiryId });
+}
+
+function popPollutant(el) {
+  var i;
+  for (i = 0; i < activePollutants.length; i++) {
+    if (activePollutants[i].el === el) {
+      clearTimeout(activePollutants[i].expiryId);
+      break;
+    }
+  }
+  score = score + 20;
+  updateScore();
+  showScorePopPercent(parseFloat(el.style.left), parseFloat(el.style.top), "+20", false);
+  el.classList.add("popped");
+  setTimeout(function () { removePollutantEl(el); }, 160);
+}
+
+function removePollutantEl(el) {
+  if (el.parentNode) { el.parentNode.removeChild(el); }
+  var i;
+  for (i = 0; i < activePollutants.length; i++) {
+    if (activePollutants[i].el === el) { activePollutants.splice(i, 1); break; }
+  }
+}
+
+function clearAllPollutants() {
+  stopPollutantSpawner();
+  var i;
+  for (i = 0; i < activePollutants.length; i++) {
+    clearTimeout(activePollutants[i].expiryId);
+    if (activePollutants[i].el.parentNode) {
+      activePollutants[i].el.parentNode.removeChild(activePollutants[i].el);
+    }
+  }
+  activePollutants = [];
 }
 
 /* =================================================================
@@ -251,11 +390,11 @@ function updateTaskHint() {
   var debrisDone = (debrisRemaining <= 0 && debrisSpawned === true);
 
   if (waterDone === false && debrisDone === false) {
-    taskHint.textContent = "Purify the water and collect the debris";
+    taskHint.textContent = "Purify the water (Z) and gather the debris (X) — pop the pollutants!";
   } else if (waterDone === false) {
-    taskHint.textContent = "Now purify the water!";
+    taskHint.textContent = "Now purify the water — hold Z!";
   } else if (debrisDone === false) {
-    taskHint.textContent = "Now collect the remaining debris!";
+    taskHint.textContent = "Now gather the remaining debris — press X near it!";
   } else {
     taskHint.textContent = "Complete!";
   }
@@ -263,20 +402,18 @@ function updateTaskHint() {
 
 /* =================================================================
    WIN / LOSE
-   The debrisSpawned guard stops the win from firing at startup
-   when debrisRemaining is still 0 from initialization.
    ================================================================= */
 function checkWin() {
-  if (debrisSpawned === false) { return; }   /* not ready yet */
-  if (purity >= 100 && debrisRemaining <= 0) {
-    endGame(true);
-  }
+  if (debrisSpawned === false) { return; }
+  if (purity >= 100 && debrisRemaining <= 0) { endGame(true); }
 }
 
 function endGame(won) {
   gameActive = false;
   clearTimer();
   stopCharacterLoop();
+  clearAllPollutants();
+
   if (won) {
     resultTitle.textContent = "The wellspring runs clear";
     resultText.textContent  = "The village drinks freely tonight. Final score: " + score + ".";
@@ -284,37 +421,37 @@ function endGame(won) {
     resultTitle.textContent = "The waters clouded over";
     resultText.textContent  = "Time ran dry before the spring did. Score: " + score + ".";
   }
+
   showScreen("result");
+  if (won) { launchConfetti(); }
 }
 
 /* =================================================================
-   SCORE + TOOL DISPLAY
+   SCORE DISPLAY
    ================================================================= */
 function updateScore() {
   scoreValue.textContent = "" + score;
 }
 
-function setTool(tool) {
-  currentTool = tool;
-  if (tool === "purify") {
-    purifyTool.classList.add("active");
-    collectTool.classList.remove("active");
-    pointerGlow.className = "pointer-glow purify";
-  } else {
-    collectTool.classList.add("active");
-    purifyTool.classList.remove("active");
-    pointerGlow.className = "pointer-glow collect";
-  }
-}
-
 /* =================================================================
-   CHARACTER MOVEMENT
-   The character slides toward charTargetX/Y each frame.
-   It stays clamped inside the pond circle so it never escapes.
+   CHARACTER MOVEMENT + ABILITY LOOP
+   Runs ~60 times a second. Moves the alchemist by whatever movement
+   keys are held, then fires whichever ability key is held (rate-limited
+   by a cooldown so holding doesn't act every single frame).
    ================================================================= */
 function placeCharacter() {
   character.style.left = charX + "%";
   character.style.top  = charY + "%";
+}
+
+function clampCharacterToPond() {
+  var dx = charX - 50;
+  var dy = charY - 50;
+  var dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist > 38) {
+    charX = 50 + (dx / dist) * 38;
+    charY = 50 + (dy / dist) * 38;
+  }
 }
 
 function startCharacterLoop() {
@@ -323,42 +460,129 @@ function startCharacterLoop() {
 }
 
 function stopCharacterLoop() {
-  if (charMoveId !== null) {
-    cancelAnimationFrame(charMoveId);
-    charMoveId = null;
-  }
+  if (charMoveId !== null) { cancelAnimationFrame(charMoveId); charMoveId = null; }
 }
 
 function characterStep() {
-  var speed = 0.04;   /* fraction of remaining distance to close each frame */
+  var now = Date.now();
 
-  var dx = charTargetX - charX;
-  var dy = charTargetY - charY;
+  /* --- movement --- */
+  var mx = 0;
+  var my = 0;
+  if (keysDown.left)  { mx = mx - 1; }
+  if (keysDown.right) { mx = mx + 1; }
+  if (keysDown.up)    { my = my - 1; }
+  if (keysDown.down)  { my = my + 1; }
 
-  /* Only move if there is meaningful distance left */
-  if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-    charX = charX + dx * speed;
-    charY = charY + dy * speed;
-
-    /* Clamp inside pond circle (center 50,50 radius ~38) */
-    var cdx = charX - 50;
-    var cdy = charY - 50;
-    var dist = Math.sqrt(cdx * cdx + cdy * cdy);
-    if (dist > 38) {
-      charX = 50 + (cdx / dist) * 38;
-      charY = 50 + (cdy / dist) * 38;
+  if (mx !== 0 || my !== 0) {
+    /* Normalise diagonals so they aren't faster than straight lines. */
+    if (mx !== 0 && my !== 0) {
+      mx = mx * 0.7071;
+      my = my * 0.7071;
     }
-
+    charX = charX + mx * MOVE_SPEED;
+    charY = charY + my * MOVE_SPEED;
+    clampCharacterToPond();
     placeCharacter();
   }
 
-  if (gameActive) {
-    charMoveId = requestAnimationFrame(characterStep);
+  /* --- abilities --- */
+  if (keysDown.z && now - lastPurifyTime > PURIFY_COOLDOWN) {
+    lastPurifyTime = now;
+    purifyAtPercent(charX, charY);
+  }
+  if (keysDown.x && now - lastCollectTime > COLLECT_COOLDOWN) {
+    lastCollectTime = now;
+    gatherNearCharacter();
+  }
+
+  /* --- glowing hand around the alchemist --- */
+  if (keysDown.z) {
+    pointerGlow.className = "pointer-glow purify";
+    pointerGlow.style.opacity = 1;
+  } else if (keysDown.x) {
+    pointerGlow.className = "pointer-glow collect";
+    pointerGlow.style.opacity = 1;
+  } else {
+    pointerGlow.style.opacity = 0;
+  }
+  pointerGlow.style.left = charX + "%";
+  pointerGlow.style.top  = charY + "%";
+
+  if (gameActive) { charMoveId = requestAnimationFrame(characterStep); }
+}
+
+/* =================================================================
+   CONFETTI  (LevelUp: Celebrate Wins)
+   ================================================================= */
+var CONFETTI_COLORS = [
+  "#b48a3c", "#d8b15e", "#4fb3cd", "#a7e4f1",
+  "#9c3a2e", "#ece2c8", "#7fa86b", "#cf86a8"
+];
+
+function launchConfetti() {
+  stopConfetti();
+  confettiPieces = [];
+  var stage = document.getElementById("stage");
+  confettiCanvas.width  = stage.offsetWidth;
+  confettiCanvas.height = stage.offsetHeight;
+
+  var i;
+  for (i = 0; i < 120; i++) {
+    confettiPieces.push({
+      x:      Math.random() * confettiCanvas.width,
+      y:      Math.random() * -confettiCanvas.height,
+      w:      6 + Math.random() * 8,
+      h:      10 + Math.random() * 6,
+      color:  CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      speedY: 2.5 + Math.random() * 3,
+      speedX: (Math.random() - 0.5) * 2,
+      angle:  Math.random() * 360,
+      spin:   (Math.random() - 0.5) * 6
+    });
+  }
+  confettiAnimId = requestAnimationFrame(confettiStep);
+}
+
+function confettiStep() {
+  var ctx = confettiCanvas.getContext("2d");
+  ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+
+  var allDone = true;
+  var i;
+  for (i = 0; i < confettiPieces.length; i++) {
+    var p = confettiPieces[i];
+    p.y     = p.y + p.speedY;
+    p.x     = p.x + p.speedX;
+    p.angle = p.angle + p.spin;
+    if (p.y < confettiCanvas.height + 20) { allDone = false; }
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.angle * Math.PI / 180);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+    ctx.restore();
+  }
+
+  if (allDone === false) {
+    confettiAnimId = requestAnimationFrame(confettiStep);
+  } else {
+    stopConfetti();
+  }
+}
+
+function stopConfetti() {
+  if (confettiAnimId !== null) { cancelAnimationFrame(confettiAnimId); confettiAnimId = null; }
+  confettiPieces = [];
+  if (confettiCanvas) {
+    var ctx = confettiCanvas.getContext("2d");
+    ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
   }
 }
 
 /* =================================================================
-   VISUAL EFFECTS
+   VISUAL EFFECTS (percent-based so mouse + keyboard share them)
    ================================================================= */
 function clientToPercent(clientX, clientY) {
   var bounds = pond.getBoundingClientRect();
@@ -367,36 +591,23 @@ function clientToPercent(clientX, clientY) {
   return { x: px, y: py };
 }
 
-function spawnRipple(clientX, clientY) {
-  var spot = clientToPercent(clientX, clientY);
+function spawnRipplePercent(xp, yp) {
   var ring = document.createElement("div");
   ring.className  = "ripple";
-  ring.style.left = spot.x + "%";
-  ring.style.top  = spot.y + "%";
+  ring.style.left = xp + "%";
+  ring.style.top  = yp + "%";
   pond.appendChild(ring);
   setTimeout(function () { ring.remove(); }, 600);
 }
 
-function showScorePop(clientX, clientY, text) {
-  var spot = clientToPercent(clientX, clientY);
-  var pop  = document.createElement("div");
-  pop.className   = "score-pop";
+function showScorePopPercent(xp, yp, text, isPenalty) {
+  var pop = document.createElement("div");
+  pop.className   = isPenalty ? "penalty-pop" : "score-pop";
   pop.textContent = text;
-  pop.style.left  = spot.x + "%";
-  pop.style.top   = spot.y + "%";
+  pop.style.left  = xp + "%";
+  pop.style.top   = yp + "%";
   pond.appendChild(pop);
-  setTimeout(function () { pop.remove(); }, 700);
-}
-
-function onPondMove(event) {
-  var spot = clientToPercent(event.clientX, event.clientY);
-  pointerGlow.style.left    = spot.x + "%";
-  pointerGlow.style.top     = spot.y + "%";
-  pointerGlow.style.opacity = 1;
-}
-
-function onPondLeave() {
-  pointerGlow.style.opacity = 0;
+  setTimeout(function () { pop.remove(); }, 800);
 }
 
 /* =================================================================
@@ -407,9 +618,37 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
   if (toastTimer !== null) { clearTimeout(toastTimer); }
-  toastTimer = setTimeout(function () {
-    toast.classList.remove("show");
-  }, 2600);
+  toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 2600);
+}
+
+/* =================================================================
+   KEYBOARD INPUT
+   ================================================================= */
+function onKeyDown(event) {
+  var key = event.key.toLowerCase();
+
+  /* movement */
+  if (key === "arrowup"    || key === "w") { keysDown.up    = true; event.preventDefault(); }
+  if (key === "arrowdown"  || key === "s") { keysDown.down  = true; event.preventDefault(); }
+  if (key === "arrowleft"  || key === "a") { keysDown.left  = true; event.preventDefault(); }
+  if (key === "arrowright" || key === "d") { keysDown.right = true; event.preventDefault(); }
+
+  /* abilities */
+  if (key === "z") { keysDown.z = true; purifyTool.classList.add("active"); }
+  if (key === "x") { keysDown.x = true; collectTool.classList.add("active"); }
+
+  /* reset */
+  if (key === "r") { if (gameActive) { resetGame(); } }
+}
+
+function onKeyUp(event) {
+  var key = event.key.toLowerCase();
+  if (key === "arrowup"    || key === "w") { keysDown.up    = false; }
+  if (key === "arrowdown"  || key === "s") { keysDown.down  = false; }
+  if (key === "arrowleft"  || key === "a") { keysDown.left  = false; }
+  if (key === "arrowright" || key === "d") { keysDown.right = false; }
+  if (key === "z") { keysDown.z = false; purifyTool.classList.remove("active"); }
+  if (key === "x") { keysDown.x = false; collectTool.classList.remove("active"); }
 }
 
 /* =================================================================
@@ -417,21 +656,19 @@ function showToast(message) {
    ================================================================= */
 document.getElementById("startBtn").addEventListener("click", startGame);
 document.getElementById("playAgainBtn").addEventListener("click", startGame);
+document.getElementById("resetBtn").addEventListener("click", resetGame);
 
-purifyTool.addEventListener("click",  function () { setTool("purify"); });
-collectTool.addEventListener("click", function () { setTool("collect"); });
+/* Clicking the ability buttons triggers the ability at the alchemist. */
+purifyTool.addEventListener("click",  function () { if (gameActive) { purifyAtPercent(charX, charY); } });
+collectTool.addEventListener("click", function () { if (gameActive) { gatherNearCharacter(); } });
 
-pond.addEventListener("click",      onPondClick);
-pond.addEventListener("mousemove",  onPondMove);
-pond.addEventListener("mouseleave", onPondLeave);
+pond.addEventListener("click", onPondClick);
 
-document.addEventListener("keydown", function (event) {
-  if (event.key === "1") { setTool("purify"); }
-  if (event.key === "2") { setTool("collect"); }
-});
+document.addEventListener("keydown", onKeyDown);
+document.addEventListener("keyup",   onKeyUp);
 
 document.getElementById("helpBtn").addEventListener("click", function () {
-  showToast("Purifying Hand: click the water to clean it. Gathering Hand: click debris to collect it. Finish both before time runs out!");
+  showToast("Move with Arrow keys or WASD. Hold Z to purify the water, press X near debris to gather it (and to pop pollutants). Press R to reset.");
 });
 document.getElementById("loginBtn").addEventListener("click", function () {
   showToast("Accounts arrive in a later build. For now, just press Start.");

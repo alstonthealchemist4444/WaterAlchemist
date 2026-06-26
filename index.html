@@ -94,17 +94,21 @@
       <div class="pointer-glow purify" id="pointerGlow"></div>
     </div>
 
+    <!-- Controls reminder -->
+    <div id="controlsHint" class="controls-hint">Move: Arrow Keys / WASD &nbsp;&middot;&nbsp; Z Purify &nbsp;&middot;&nbsp; X Gather &nbsp;&middot;&nbsp; R Reset</div>
+
     <!-- Task hint: tells the player what they still need to do -->
     <div id="taskHint" class="task-hint">Purify the water and collect the debris</div>
 
-    <!-- Tool toggle: one active hand at a time.
-         Sits in the bottom-center, clearly outside the pond. -->
+    <!-- Ability indicators. They light up while Z / X are held, and can
+         also be clicked to trigger the ability at the alchemist. -->
     <div class="toolbar">
-      <button class="tool-btn active" id="purifyTool">✨ Purifying Hand (1)</button>
-      <button class="tool-btn" id="collectTool">🤚 Gathering Hand (2)</button>
+      <button class="tool-btn" id="purifyTool">✨ Purify (Z)</button>
+      <button class="tool-btn" id="collectTool">🤚 Gather (X)</button>
     </div>
 
     <button id="optionsBtn" class="corner left">Options</button>
+    <button id="resetBtn" class="corner center">Reset</button>
     <button id="nextLevelBtn" class="corner right">Next Level</button>
   </section>
 
@@ -112,6 +116,8 @@
        RESULT OVERLAY
        ============================================================= -->
   <section id="resultScreen" class="screen hidden">
+    <!-- Confetti canvas sits behind the card -->
+    <canvas id="confettiCanvas"></canvas>
     <div class="result-card panel">
       <h2 id="resultTitle">The wellspring runs clear</h2>
       <p id="resultText">The village drinks freely tonight.</p>
