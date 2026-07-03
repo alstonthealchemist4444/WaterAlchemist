@@ -34,7 +34,7 @@ html, body {
 }
 
 body {
-  font-family: "EB Garamond", Georgia, serif;
+  font-family: "Montserrat", "Helvetica Neue", Arial, sans-serif;
   color: var(--ink);
   background: #1a1712;
   display: flex;
@@ -65,7 +65,7 @@ body {
   padding: 22px;
 }
 
-.hidden { display: none !important; }
+.hidden { display: none; }
 
 /* ===================================================================
    SHARED PIECES: parchment panels, buttons, the gold diamond accent
@@ -547,9 +547,6 @@ button:focus-visible {
   text-align: center;
   z-index: 20;
 }
-#resultScreen.hidden {
-  display: none !important;
-}
 .result-card {
   padding: 30px 40px;
   max-width: 80%;
@@ -594,4 +591,103 @@ button:focus-visible {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ===================================================================
+   DIFFICULTY SELECTOR  (start screen)
+   =================================================================== */
+.difficulty-wrap {
+  text-align: center;
+  margin: 4px 0 14px;
+}
+.difficulty-label {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.difficulty-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.diff-btn {
+  font-family: "Montserrat", sans-serif;
+  font-size: 14px;
+  padding: 8px 20px;
+  border: 2px solid var(--gold);
+  color: var(--ink);
+  background: rgba(255,255,255,0.55);
+}
+.diff-btn.active {
+  background: var(--gold);
+  color: #2a2114;
+  box-shadow: 0 3px 0 #8a6a2c, inset 0 0 0 2px var(--gold-bright);
+}
+
+/* ===================================================================
+   MILESTONE BANNER  (LevelUp: Milestones)
+   Slides down from the top of the play area, then fades.
+   =================================================================== */
+.milestone-banner {
+  position: absolute;
+  top: 92px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-14px);
+  padding: 8px 22px;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #ffd200, #ffc94d);
+  color: #2a2114;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+  font-size: clamp(13px, 2vw, 17px);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+  border: 2px solid #fff;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 12;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.milestone-banner.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ===================================================================
+   CHARITY: WATER FOOTER
+   Yellow + blue nod to the brand's jerry-can and water palette.
+   =================================================================== */
+.cw-footer {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: "Montserrat", sans-serif;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.cw-footer span { opacity: 0.85; }
+.cw-footer a {
+  color: #1a7fc4;             /* charity: water blue */
+  font-weight: 700;
+  text-decoration: none;
+  border-bottom: 2px solid #ffd200; /* jerry-can yellow underline */
+  padding-bottom: 1px;
+}
+.cw-footer a:hover { color: #0f5e94; }
+
+/* On the result card the footer is static, not pinned to the stage. */
+.cw-footer.result-footer {
+  position: static;
+  transform: none;
+  justify-content: center;
+  margin-top: 18px;
+  flex-wrap: wrap;
 }

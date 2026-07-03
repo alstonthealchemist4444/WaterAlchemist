@@ -10,7 +10,7 @@
      fail to load, the serif fallbacks below keep everything readable. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital@0;1&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital@0;1&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <!-- Our external stylesheet -->
 <link rel="stylesheet" href="style.css">
@@ -39,10 +39,27 @@
 
     <p class="intro panel">Transmute the murk to mercy before the hourglass runs dry.</p>
 
+    <!-- Difficulty selector -->
+    <div class="difficulty-wrap">
+      <div class="difficulty-label">Choose your trial</div>
+      <div class="difficulty-buttons">
+        <button class="diff-btn" id="diffEasy">Easy</button>
+        <button class="diff-btn active" id="diffNormal">Normal</button>
+        <button class="diff-btn" id="diffHard">Hard</button>
+      </div>
+    </div>
+
     <button id="startBtn">Start</button>
 
     <button id="helpBtn" class="corner left">Help</button>
     <button id="loginBtn" class="corner right">Login</button>
+
+    <!-- charity: water mission footer -->
+    <footer class="cw-footer">
+      <span>Inspired by the mission of clean water for all.</span>
+      <a href="https://www.charitywater.org/" target="_blank" rel="noopener">charity: water</a>
+      <a href="https://www.charitywater.org/donate" target="_blank" rel="noopener">Donate</a>
+    </footer>
   </section>
 
   <!-- =============================================================
@@ -124,6 +141,9 @@
       <div class="pointer-glow purify" id="pointerGlow"></div>
     </div>
 
+    <!-- Milestone banner: flashes encouraging messages at score thresholds -->
+    <div id="milestoneBanner" class="milestone-banner"></div>
+
     <!-- Controls reminder -->
     <div id="controlsHint" class="controls-hint">Move: Arrow Keys / WASD &nbsp;&middot;&nbsp; Z Purify &nbsp;&middot;&nbsp; X Gather &nbsp;&middot;&nbsp; R Reset</div>
 
@@ -152,8 +172,21 @@
       <h2 id="resultTitle">The wellspring runs clear</h2>
       <p id="resultText">The village drinks freely tonight.</p>
       <button id="playAgainBtn">Play Again</button>
+      <footer class="cw-footer result-footer">
+        <span>Real wells change real lives.</span>
+        <a href="https://www.charitywater.org/donate" target="_blank" rel="noopener">Support charity: water</a>
+      </footer>
     </div>
   </section>
+
+  <!-- Sound effects. Swap these files for your own from Pixabay/Freesound
+       if you like — just keep the same ids. -->
+  <audio id="sndPurify"    src="sounds/purify.wav"    preload="auto"></audio>
+  <audio id="sndCollect"   src="sounds/collect.wav"   preload="auto"></audio>
+  <audio id="sndPenalty"   src="sounds/penalty.wav"   preload="auto"></audio>
+  <audio id="sndClick"     src="sounds/click.wav"     preload="auto"></audio>
+  <audio id="sndMilestone" src="sounds/milestone.wav" preload="auto"></audio>
+  <audio id="sndWin"       src="sounds/win.wav"       preload="auto"></audio>
 
   <!-- shared toast message -->
   <div id="toast" class="panel"></div>

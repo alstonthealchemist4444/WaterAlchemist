@@ -11,7 +11,7 @@
    Mouse still works too: click water to purify, click debris to collect.
    ================================================================= */
 
-/* ---- Tunable settings ---- */
+/* ---- Tunable settings (these change with difficulty) ---- */
 var TOTAL_TIME         = 90;
 var DEBRIS_COUNT       = 6;
 var PURIFY_PER_TICK    = 7;     /* purity added each purify tick */
@@ -27,6 +27,50 @@ var POLLUTANT_INTERVAL = 6000;
 var POLLUTANT_PENALTY  = 30;
 var POLLUTANT_LIFETIME = 4000;
 var POLLUTANT_SIZE     = 28;
+
+/* ---- Difficulty presets ----
+   Each mode changes the pace and goals: how long you have, how much
+   debris, and how fast/aggressive the pollutants are. */
+var currentDifficulty = "normal";
+
+var DIFFICULTIES = {
+  easy: {
+    time: 120, debris: 4,
+    pollutantInterval: 9000, pollutantLifetime: 6000, pollutantPenalty: 15,
+    purifyPerTick: 9
+  },
+  normal: {
+    time: 90, debris: 6,
+    pollutantInterval: 6000, pollutantLifetime: 4000, pollutantPenalty: 30,
+    purifyPerTick: 7
+  },
+  hard: {
+    time: 60, debris: 9,
+    pollutantInterval: 3500, pollutantLifetime: 3000, pollutantPenalty: 45,
+    purifyPerTick: 6
+  }
+};
+
+function applyDifficulty(name) {
+  currentDifficulty = name;
+  var d = DIFFICULTIES[name];
+  TOTAL_TIME         = d.time;
+  DEBRIS_COUNT       = d.debris;
+  POLLUTANT_INTERVAL = d.pollutantInterval;
+  POLLUTANT_LIFETIME = d.pollutantLifetime;
+  POLLUTANT_PENALTY  = d.pollutantPenalty;
+  PURIFY_PER_TICK    = d.purifyPerTick;
+}
+
+/* ---- Milestone messages (LevelUp) ----
+   Shown once each, as the running score climbs past the threshold. */
+var MILESTONES = [
+  { score: 100, message: "A trickle becomes a stream!" },
+  { score: 250, message: "Halfway to a clean spring!" },
+  { score: 400, message: "The village takes heart!" },
+  { score: 600, message: "A wellspring reborn!" }
+];
+var milestonesHit = [];   /* remembers which thresholds already fired */
 
 /* ---- Game state ---- */
 var purity          = 0;
@@ -76,6 +120,33 @@ var resultText     = document.getElementById("resultText");
 var confettiCanvas = document.getElementById("confettiCanvas");
 var toast          = document.getElementById("toast");
 
+var milestoneBanner = document.getElementById("milestoneBanner");
+var milestoneTimer  = null;
+
+var diffEasy   = document.getElementById("diffEasy");
+var diffNormal = document.getElementById("diffNormal");
+var diffHard   = document.getElementById("diffHard");
+
+/* =================================================================
+   SOUND  (LevelUp: Sound Effects)
+   Each name maps to an <audio> element. We clone the node before
+   playing so the same sound can overlap with itself (e.g. collecting
+   two pieces quickly) without cutting off.
+   ================================================================= */
+var soundOn = true;
+function playSound(name) {
+  if (soundOn === false) { return; }
+  var el = document.getElementById(name);
+  if (el === null) { return; }
+  try {
+    var clip = el.cloneNode(true);
+    clip.volume = 0.5;
+    clip.play();
+  } catch (err) {
+    /* Some browsers block audio until the first click — safe to ignore. */
+  }
+}
+
 /* =================================================================
    SCREEN SWITCHING
    ================================================================= */
@@ -97,6 +168,8 @@ function startGame() {
   timeLeft        = TOTAL_TIME;
   debrisRemaining = 0;
   debrisSpawned   = false;
+  milestonesHit   = [];
+  hideMilestone();
 
   /* clear any held keys from a previous round */
   keysDown.up = false; keysDown.down = false;
@@ -225,6 +298,7 @@ function collectDebrisPiece(piece) {
   var xp = parseFloat(piece.style.left);
   var yp = parseFloat(piece.style.top);
   showScorePopPercent(xp, yp, "+" + POINTS_PER_DEBRIS, false);
+  playSound("sndCollect");
 
   setTimeout(function () { piece.remove(); }, 220);
   checkWin();
@@ -252,6 +326,7 @@ function purifyAtPercent(xp, yp) {
   updateWater();
   updateTaskHint();
   spawnRipplePercent(xp, yp);
+  playSound("sndPurify");
   checkWin();
 }
 
@@ -333,6 +408,7 @@ function spawnPollutant() {
     updateScore();
     showScorePopPercent(parseFloat(el.style.left), parseFloat(el.style.top),
                         "-" + POLLUTANT_PENALTY, true);
+    playSound("sndPenalty");
     removePollutantEl(el);
   }, POLLUTANT_LIFETIME);
 
@@ -358,6 +434,7 @@ function popPollutant(el) {
   score = score + 20;
   updateScore();
   showScorePopPercent(parseFloat(el.style.left), parseFloat(el.style.top), "+20", false);
+  playSound("sndCollect");
   el.classList.add("popped");
   setTimeout(function () { removePollutantEl(el); }, 160);
 }
@@ -413,17 +490,20 @@ function endGame(won) {
   clearTimer();
   stopCharacterLoop();
   clearAllPollutants();
+  hideMilestone();
+
+  var diffLabel = currentDifficulty.charAt(0).toUpperCase() + currentDifficulty.slice(1);
 
   if (won) {
     resultTitle.textContent = "The wellspring runs clear";
-    resultText.textContent  = "The village drinks freely tonight. Final score: " + score + ".";
+    resultText.textContent  = "The village drinks freely tonight. " + diffLabel + " mode, final score: " + score + ".";
   } else {
     resultTitle.textContent = "The waters clouded over";
-    resultText.textContent  = "Time ran dry before the spring did. Score: " + score + ".";
+    resultText.textContent  = "Time ran dry before the spring did. " + diffLabel + " mode, score: " + score + ".";
   }
 
   showScreen("result");
-  if (won) { launchConfetti(); }
+  if (won) { launchConfetti(); playSound("sndWin"); }
 }
 
 /* =================================================================
@@ -431,6 +511,35 @@ function endGame(won) {
    ================================================================= */
 function updateScore() {
   scoreValue.textContent = "" + score;
+  checkMilestones();
+}
+
+/* =================================================================
+   MILESTONES  (LevelUp)
+   Walk the milestone list; the first threshold we've passed but not yet
+   celebrated fires its banner and is remembered so it won't repeat.
+   ================================================================= */
+function checkMilestones() {
+  var i;
+  for (i = 0; i < MILESTONES.length; i++) {
+    var m = MILESTONES[i];
+    if (score >= m.score && milestonesHit.indexOf(m.score) === -1) {
+      milestonesHit.push(m.score);
+      showMilestone(m.message);
+    }
+  }
+}
+
+function showMilestone(message) {
+  milestoneBanner.textContent = message;
+  milestoneBanner.classList.add("show");
+  playSound("sndMilestone");
+  if (milestoneTimer !== null) { clearTimeout(milestoneTimer); }
+  milestoneTimer = setTimeout(hideMilestone, 2200);
+}
+
+function hideMilestone() {
+  milestoneBanner.classList.remove("show");
 }
 
 /* =================================================================
@@ -654,9 +763,24 @@ function onKeyUp(event) {
 /* =================================================================
    EVENT WIRING
    ================================================================= */
-document.getElementById("startBtn").addEventListener("click", startGame);
-document.getElementById("playAgainBtn").addEventListener("click", startGame);
-document.getElementById("resetBtn").addEventListener("click", resetGame);
+function setDifficulty(name) {
+  applyDifficulty(name);
+  diffEasy.classList.remove("active");
+  diffNormal.classList.remove("active");
+  diffHard.classList.remove("active");
+  if (name === "easy")   { diffEasy.classList.add("active"); }
+  if (name === "normal") { diffNormal.classList.add("active"); }
+  if (name === "hard")   { diffHard.classList.add("active"); }
+  playSound("sndClick");
+}
+
+diffEasy.addEventListener("click",   function () { setDifficulty("easy"); });
+diffNormal.addEventListener("click", function () { setDifficulty("normal"); });
+diffHard.addEventListener("click",   function () { setDifficulty("hard"); });
+
+document.getElementById("startBtn").addEventListener("click", function () { playSound("sndClick"); startGame(); });
+document.getElementById("playAgainBtn").addEventListener("click", function () { playSound("sndClick"); startGame(); });
+document.getElementById("resetBtn").addEventListener("click", function () { playSound("sndClick"); resetGame(); });
 
 /* Clicking the ability buttons triggers the ability at the alchemist. */
 purifyTool.addEventListener("click",  function () { if (gameActive) { purifyAtPercent(charX, charY); } });
@@ -668,19 +792,26 @@ document.addEventListener("keydown", onKeyDown);
 document.addEventListener("keyup",   onKeyUp);
 
 document.getElementById("helpBtn").addEventListener("click", function () {
+  playSound("sndClick");
   showToast("Move with Arrow keys or WASD. Hold Z to purify the water, press X near debris to gather it (and to pop pollutants). Press R to reset.");
 });
 document.getElementById("loginBtn").addEventListener("click", function () {
+  playSound("sndClick");
   showToast("Accounts arrive in a later build. For now, just press Start.");
 });
 document.getElementById("settingsBtn").addEventListener("click", function () {
+  playSound("sndClick");
   showToast("Settings are still on the workbench.");
 });
 document.getElementById("optionsBtn").addEventListener("click", function () {
+  playSound("sndClick");
   showToast("Options are still on the workbench.");
 });
 document.getElementById("nextLevelBtn").addEventListener("click", function () {
+  playSound("sndClick");
   showToast("Only the Village spring exists so far. Clear this one first.");
 });
 
+/* Start on Normal by default. */
+applyDifficulty("normal");
 showScreen("start");
